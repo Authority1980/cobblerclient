@@ -1,0 +1,87 @@
+#!/usr/bin/perl
+
+use warnings;
+use strict;
+
+use Config::Auto;
+use Getopt::Std;
+$Getopt::Std::STANDARD_HELP_VERSION = 'false';
+
+our $VERSION = '1.0.0';
+
+# Defaults
+my $cobblerClientRc = "/etc/cobblerclientrc";
+my $repoConfigDir = "/etc/yum.repos.d";
+my $repoConfigFile = "$repoConfigDir/cobbler-config.repo";
+
+my $VERBOSE = 0;
+my %options = ();
+getopts( "hvc:r:", \%options );
+
+if( defined($options{h}) ) { &HELP_MESSAGE && exit(0); }
+if( defined($options{v}) ) { $VERBOSE=1; }
+
+sub VERSION_MESSAGE() {
+  print <<EOF;
+Cobblerclient version $VERSION
+EOF
+}
+
+sub HELP_MESSAGE() {
+  print <<EOF;
+Usage: cobblerclient <options> <command>
+Options:
+  -h          Show this help
+  -c <file>   Use <file> for cobblerclient config
+  -r <file>   Write repo config to <file>
+  -v          Verbose
+
+Commands:
+  get-repos   Fetch yum repo config from Cobbler server
+
+EOF
+}
+
+sub getRepos($) {
+  use File::Basename;
+  use File::Temp;
+  use LWP::Simple;
+
+  my $config = shift;
+
+  my $tmpfh = File::Temp->new( UNLINK => 1 , SUFFIX => '.repo.tmp' , DIR => $repoConfigDir);
+    #or die("Could not create temporary file in $repoConfigDir: $!\n");
+  my $tmpfilename = $tmpfh->filename;
+  print("Fetching repos for profile $config->{'Profile'} from $config->{'ServerName'}\n") if $VERBOSE;
+  my $url = "http://".$config->{'ServerName'}."/cblr/svc/op/yum/profile/".$config->{'Profile'};
+  my $status = getstore($url, $tmpfilename);
+  if( is_error($status) ) {
+    print("Failed to fetch repo config: STATUS $status\n");
+    exit(2);
+  } else {
+    rename($tmpfilename , $repoConfigFile) or die;
+  }
+}
+
+# Check for alternate config file specified on command line
+if( defined($options{c}) ) {
+  $cobblerClientRc = "$options{c}";
+}
+
+# Read config file
+my $config = Config::Auto::parse( "$cobblerClientRc" );
+
+# Check for alternate repo config file specified on command line
+if( defined($options{r}) ) {
+  $repoConfigFile = "$options{r}";
+  $repoConfigDir = dirname($repoConfigFile);
+}
+
+# There should be at least one argument, i.e. what to do, else quit
+unless( scalar(@ARGV) == 1 ) { &HELP_MESSAGE(); exit(1); }
+my $command = shift;
+
+if( $command eq 'get-repos' ) { &getRepos($config); }
+else { warn("Unknown Action\n"); &HELP_MESSAGE(); exit(1); }
+
+# vim:ts=2 sw=2 expandtab smartindent
